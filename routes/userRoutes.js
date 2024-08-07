@@ -4,7 +4,7 @@ const db = require('../db');
 const bcrypt =require("bcrypt");
 
 // Registers a new user in the system
-app.post('/register',async (req, res) => {
+app.post('/register',async (req, res) => { 
   const { username,password, email } = req.body;
   const query = 'INSERT INTO users SET ?';
     const HashPassword= await bcrypt.hash(password,10); 
