@@ -3,6 +3,37 @@ const app = express.Router();
 const db = require("../db");
 const bcrypt = require("bcrypt");
 
+
+// Middleware to parse JSON bodies
+app.use(express.json());
+
+// Session store options
+const sessionStore = new MySQLStore({}, db);
+// Configure session middleware
+app.use(session({
+  key: 'session_cookie_name', // You can name this as you like
+  secret: 'your_secret_key', // Replace with a strong secret in production
+  store: sessionStore,
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    maxAge: 1000 * 60 * 60 * 24, // Session expires after 1 day
+    httpOnly: true, // Helps prevent XSS
+    secure: false, // Set to true if using HTTPS
+  }
+}));
+
+
+// Middleware to check if user is authenticated
+function isAuthenticated(req, res, next) {
+  if (req.session.userId) {
+    next();
+  } else {
+    res.status(401).json({ message: "Unauthorized: Please log in." });
+  }
+}
+
+
 // Registers a new user in the system
 app.post("/register", async (req, res) => {
   const { username, password, email } = req.body;
@@ -13,6 +44,9 @@ app.post("/register", async (req, res) => {
     const checkEmail = "SELECT email FROM users WHERE email=?";
     db.query(checkEmail, [email], async (error, results) => {
       if (error) throw error;
+      // Optionally, automatically log the user in after registration
+      req.session.userId = results.insertId;
+      
       if (results.length > 0) {
         res.status(200).json({ message: "Email already registered" });
       } else {
@@ -44,6 +78,8 @@ app.post("/login", (req, res) => {
         const isPasswordValid = await bcrypt.compare(password, user.password);
 
         if (isPasswordValid) {
+          req.session.userId = user.user_id; // Adjust based on your user ID field
+
           res.json({ message: "Welcome" });
         } else {
           res.status(401).send({ message: "Wrong username or password" });
@@ -55,8 +91,9 @@ app.post("/login", (req, res) => {
   }
 });
 
+
 // Retrieve a single user by id
-app.get("/user/:id", (req, res) => {
+app.get("/user/:id", isAuthenticated,(req, res) => {
   const { id } = req.params;
   const query = "SELECT * FROM users WHERE user_id=?";
 
@@ -132,6 +169,7 @@ app.get("/books:id", (req, res) => {
   });
 });
 
+
 // Updates single book
 app.put("/books/:id", (req, res) => {
   const { id } = req.params;
@@ -173,7 +211,7 @@ app.post("/subscribe", (req, res) => {
 });
 
 // Get all subscriptions
-app.get("/subscriptions", (req, res) => {
+app.get("/subscriptions",isAuthenticated, (req, res) => {
   const query = "SELECT * FROM subscriptions";
   db.query(query, (error, results) => {
     if (error) throw error;
@@ -184,7 +222,7 @@ app.get("/subscriptions", (req, res) => {
 // ========Admin logins and athes Operations==========
 
 // Retrieve a all  user
-app.get("/admin/users", (req, res) => {
+app.get("/admin/users", isAuthenticated,(req, res) => {
   const { id } = req.params;
   const query = "SELECT * FROM users";
 
@@ -195,7 +233,7 @@ app.get("/admin/users", (req, res) => {
 });
 
 // Update a user by id
-app.put("/admin/user/:id", (req, res) => {
+app.put("/admin/user/:id", isAuthenticated,(req, res) => {
   const { id } = req.params;
   const { username, password, email } = req.body;
   if (!username || !password || !email) {
@@ -211,7 +249,7 @@ app.put("/admin/user/:id", (req, res) => {
 });
 
 // Update a user by id
-app.put("/admin/user/:id", (req, res) => {
+app.put("/admin/user/:id", isAuthenticated,(req, res) => {
   const { id } = req.params;
   const { username, password, email } = req.body;
   const query =
@@ -223,7 +261,7 @@ app.put("/admin/user/:id", (req, res) => {
 });
 
 // Delete a user by id
-app.delete("/admin/user/:id", (req, res) => {
+app.delete("/admin/user/:id", isAuthenticated,(req, res) => {
   const { id } = req.params;
   const query = "DELETE FROM users WHERE id = ?";
 
@@ -237,5 +275,18 @@ app.delete("/admin/user/:id", (req, res) => {
 app.delete("/admin/analytics", (req, res) => {
   // Authorization: Bearer {admin_token}
 });
+
+// Logout route
+router.post("/logout", (req, res) => {
+  req.session.destroy((err) => {
+    if (err) {
+      return res.status(500).json({ message: "Error logging out" });
+    }
+    res.clearCookie('session_cookie_name'); // Use the same key as in session middleware
+    res.json({ message: "Logout successful" });
+  });
+});
+
+
 
 module.exports = app;
